@@ -13,6 +13,8 @@ struct Config {
   int maxProximityPixels = 4096;
   int outputTilesX = 0;
   int outputTilesY = 0;
+  int targetWidth = 1024;
+  int targetHeight = 768;
 
   double seaLevel = 0.0;
   double landMinHeight = 0.01;
