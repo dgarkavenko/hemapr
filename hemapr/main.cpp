@@ -6,6 +6,8 @@
 #include <filesystem>
 #include <iostream>
 #include <limits>
+#include <optional>
+#include <regex>
 #include <string>
 #include <vector>
 
@@ -25,6 +27,188 @@
 #include "lodepng.h"
 
 namespace fs = std::filesystem;
+
+struct ExpectedBounds {
+  double xmin;
+  double xmax;
+  double ymin;
+  double ymax;
+};
+
+std::optional<ExpectedBounds> parseExpectedBounds(const fs::path& path) {
+  std::string name = path.stem().string();
+  std::replace(name.begin(), name.end(), ',', '.');
+  std::regex re(R"(.*_(-?\d+(?:\.\d+)?)_(-?\d+(?:\.\d+)?)_(-?\d+(?:\.\d+)?)_(-?\d+(?:\.\d+)?)$)");
+  std::smatch match;
+  if (!std::regex_match(name, match, re)) return std::nullopt;
+  try {
+    ExpectedBounds bounds{
+      std::stod(match[1].str()),
+      std::stod(match[2].str()),
+      std::stod(match[3].str()),
+      std::stod(match[4].str())
+    };
+    return bounds;
+  } catch (...) {
+    return std::nullopt;
+  }
+}
+
+bool getGeoTransformBounds(GDALDataset* ds, double& xmin, double& xmax, double& ymin, double& ymax) {
+  double gt[6] = {0};
+  if (ds->GetGeoTransform(gt) != CE_None) return false;
+  const int sw = ds->GetRasterXSize();
+  const int sh = ds->GetRasterYSize();
+  double cornersX[4] = {
+    gt[0],
+    gt[0] + gt[1] * sw,
+    gt[0] + gt[2] * sh,
+    gt[0] + gt[1] * sw + gt[2] * sh
+  };
+  double cornersY[4] = {
+    gt[3],
+    gt[3] + gt[4] * sw,
+    gt[3] + gt[5] * sh,
+    gt[3] + gt[4] * sw + gt[5] * sh
+  };
+  xmin = *std::min_element(cornersX, cornersX + 4);
+  xmax = *std::max_element(cornersX, cornersX + 4);
+  ymin = *std::min_element(cornersY, cornersY + 4);
+  ymax = *std::max_element(cornersY, cornersY + 4);
+  return true;
+}
+
+void expandGeoTiffToBounds(const fs::path& inPath,
+                           GDALDataset* ds,
+                           double expXMin,
+                           double expXMax,
+                           double expYMin,
+                           double expYMax) {
+  double gt[6] = {0};
+  if (ds->GetGeoTransform(gt) != CE_None) {
+    fmt::print(stderr, "GeoTransform unavailable; cannot expand.\n");
+    return;
+  }
+
+  const int sw = ds->GetRasterXSize();
+  const int sh = ds->GetRasterYSize();
+  const double px = gt[1];
+  const double py = gt[5];
+
+  if (px == 0.0 || py == 0.0) {
+    fmt::print(stderr, "Invalid pixel size; cannot expand.\n");
+    return;
+  }
+
+  double xmin;
+  double xmax;
+  double ymin;
+  double ymax;
+  if (!getGeoTransformBounds(ds, xmin, xmax, ymin, ymax)) {
+    fmt::print(stderr, "Failed to read GeoTransform bounds.\n");
+    return;
+  }
+
+  const double tol = std::max(std::abs(px), std::abs(py)) * 0.01;
+  if (std::abs(xmin - expXMin) <= tol &&
+      std::abs(xmax - expXMax) <= tol &&
+      std::abs(ymin - expYMin) <= tol &&
+      std::abs(ymax - expYMax) <= tol) {
+    fmt::print("GeoTIFF already matches expected bounds.\n");
+    return;
+  }
+
+  if (px <= 0.0 || py >= 0.0) {
+    fmt::print(stderr, "Unsupported GeoTransform orientation; cannot expand safely.\n");
+    return;
+  }
+
+  const double colF = (expXMin - gt[0]) / px;
+  const double rowF = (expYMax - gt[3]) / py;
+  const double colMaxF = (expXMax - gt[0]) / px;
+  const double rowMaxF = (expYMin - gt[3]) / py;
+
+  const int minCol = (int)std::floor(colF + 1e-9);
+  const int minRow = (int)std::floor(rowF + 1e-9);
+  const int maxCol = (int)std::ceil(colMaxF - 1e-9);
+  const int maxRow = (int)std::ceil(rowMaxF - 1e-9);
+
+  const int newW = maxCol - minCol;
+  const int newH = maxRow - minRow;
+
+  if (newW <= 0 || newH <= 0) {
+    fmt::print(stderr, "Computed invalid target size; cannot expand.\n");
+    return;
+  }
+
+  std::vector<float> src((size_t)sw * (size_t)sh);
+  GDALRasterBand* band = ds->GetRasterBand(1);
+  if (!band) {
+    fmt::print(stderr, "Missing raster band 1; cannot expand.\n");
+    return;
+  }
+  CPLErr err = band->RasterIO(GF_Read, 0, 0, sw, sh,
+                              src.data(), sw, sh, GDT_Float32,
+                              0, 0, nullptr);
+  if (err != CE_None) {
+    fmt::print(stderr, "RasterIO failed; cannot expand.\n");
+    return;
+  }
+
+  std::vector<float> out((size_t)newW * (size_t)newH, 0.0f);
+  for (int y = 0; y < sh; ++y) {
+    int dy = y - minRow;
+    if (dy < 0 || dy >= newH) continue;
+    for (int x = 0; x < sw; ++x) {
+      int dx = x - minCol;
+      if (dx < 0 || dx >= newW) continue;
+      out[(size_t)dy * (size_t)newW + (size_t)dx] = src[(size_t)y * (size_t)sw + (size_t)x];
+    }
+  }
+
+  fs::path outPath = inPath;
+  outPath.replace_filename(inPath.stem().string() + "_expanded.tif");
+
+  GDALDriver* driver = GetGDALDriverManager()->GetDriverByName("GTiff");
+  if (!driver) {
+    fmt::print(stderr, "GTiff driver not available; cannot expand.\n");
+    return;
+  }
+
+  GDALDataset* outDs = driver->Create(outPath.string().c_str(), newW, newH, 1, GDT_Float32, nullptr);
+  if (!outDs) {
+    fmt::print(stderr, "Failed to create expanded GeoTIFF.\n");
+    return;
+  }
+
+  double newGt[6] = {gt[0] + (double)minCol * px, px, gt[2],
+                     gt[3] + (double)minRow * py, gt[4], py};
+  outDs->SetGeoTransform(newGt);
+  const char* proj = ds->GetProjectionRef();
+  if (proj && proj[0] != '\0') {
+    outDs->SetProjection(proj);
+  }
+
+  GDALRasterBand* outBand = outDs->GetRasterBand(1);
+  if (!outBand) {
+    fmt::print(stderr, "Failed to access output band.\n");
+    GDALClose(outDs);
+    return;
+  }
+
+  err = outBand->RasterIO(GF_Write, 0, 0, newW, newH,
+                          out.data(), newW, newH, GDT_Float32,
+                          0, 0, nullptr);
+  if (err != CE_None) {
+    fmt::print(stderr, "Failed to write expanded GeoTIFF.\n");
+    GDALClose(outDs);
+    return;
+  }
+
+  GDALClose(outDs);
+
+  fmt::print("Expanded GeoTIFF written: {}\n", outPath.string());
+}
 
 int main() {
   GDALAllRegister();
@@ -78,6 +262,30 @@ int main() {
   if (!ds) {
     fmt::print(stderr, "Failed to open GeoTIFF.\n");
     return 1;
+  }
+
+  auto expected = parseExpectedBounds(inPath);
+  if (expected) {
+    double xmin;
+    double xmax;
+    double ymin;
+    double ymax;
+    if (getGeoTransformBounds(ds, xmin, xmax, ymin, ymax)) {
+      fmt::print("Expected bounds from filename: xmin={:.6f} xmax={:.6f} ymin={:.6f} ymax={:.6f}\n",
+                 expected->xmin, expected->xmax, expected->ymin, expected->ymax);
+      fmt::print("Actual bounds from GeoTIFF:     xmin={:.6f} xmax={:.6f} ymin={:.6f} ymax={:.6f}\n",
+                 xmin, xmax, ymin, ymax);
+      bool modify = readYesNo("Modify GeoTIFF to expected bounds?", false);
+      if (modify) {
+        expandGeoTiffToBounds(inPath, ds,
+                              expected->xmin, expected->xmax,
+                              expected->ymin, expected->ymax);
+      }
+    } else {
+      fmt::print(stderr, "GeoTransform unavailable; cannot validate bounds.\n");
+    }
+  } else {
+    fmt::print("Filename does not contain expected bounds (xmin_xmax_ymin_ymax).\n");
   }
 
   GDALRasterBand* band = ds->GetRasterBand(1);

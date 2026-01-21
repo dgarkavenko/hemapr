@@ -50,6 +50,17 @@ int readIntWithDefault(const std::string& prompt, int def) {
   try { return std::stoi(s); } catch (...) { return def; }
 }
 
+bool readYesNo(const std::string& prompt, bool def) {
+  fmt::print("{} [{}]: ", prompt, def ? "Y/n" : "y/N");
+  std::string s;
+  std::getline(std::cin, s);
+  s = lower(trim(s));
+  if (s.empty()) return def;
+  if (s == "y" || s == "yes") return true;
+  if (s == "n" || s == "no") return false;
+  return def;
+}
+
 void writeU16BE(std::vector<unsigned char>& buf, size_t idx, uint16_t v) {
   buf[idx * 2 + 0] = (unsigned char)((v >> 8) & 0xFF);
   buf[idx * 2 + 1] = (unsigned char)(v & 0xFF);
