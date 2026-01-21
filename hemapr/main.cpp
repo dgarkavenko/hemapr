@@ -226,10 +226,13 @@ int main() {
     fmt::print("Config read failed; using defaults.\n");
   }
 
+  std::string tilesLabel = (cfg.outputTilesX > 0 && cfg.outputTilesY > 0)
+    ? fmt::format("{}x{}", cfg.outputTilesX, cfg.outputTilesY)
+    : "0";
   fmt::print(fg(fmt::color::medium_sea_green) | fmt::emphasis::bold,
-             "Config: interp={}, maxProx={}px, seabedCurve={}, gamma={}\n",
+             "Config: interp={}, maxProx={}px, tiles={}, seabedCurve={}, gamma={}\n",
              (cfg.interp == InterpMode::Bicubic ? "bicubic" : "bilinear"),
-             cfg.maxProximityPixels, cfg.seabedCurve, cfg.seabedGamma);
+             cfg.maxProximityPixels, tilesLabel, cfg.seabedCurve, cfg.seabedGamma);
 
   fs::path folder = fs::current_path().concat("/data/");
 
@@ -407,13 +410,53 @@ int main() {
   fs::path outPath = inPath;
   outPath.replace_extension(".png");
 
-  fmt::print("Writing 16-bit PNG: {}\n", outPath.string());
-  unsigned error = lodepng::encode(outPath.string(), pngBytes,
-                                   (unsigned)ow, (unsigned)oh, LCT_GREY, 16);
-  if (error) {
-    fmt::print(stderr, "PNG encode error {}: {}\n", error, lodepng_error_text(error));
-    GDALClose(ds);
-    return 1;
+  const bool hasTiles = cfg.outputTilesX > 0 && cfg.outputTilesY > 0 &&
+                        (cfg.outputTilesX > 1 || cfg.outputTilesY > 1);
+  if (!hasTiles) {
+    fmt::print("Writing 16-bit PNG: {}\n", outPath.string());
+    unsigned error = lodepng::encode(outPath.string(), pngBytes,
+                                     (unsigned)ow, (unsigned)oh, LCT_GREY, 16);
+    if (error) {
+      fmt::print(stderr, "PNG encode error {}: {}\n", error, lodepng_error_text(error));
+      GDALClose(ds);
+      return 1;
+    }
+  } else {
+    if (ow % cfg.outputTilesX != 0 || oh % cfg.outputTilesY != 0) {
+      fmt::print(stderr, "Output size {}x{} not divisible by tiles {}x{}.\n",
+                 ow, oh, cfg.outputTilesX, cfg.outputTilesY);
+      GDALClose(ds);
+      return 1;
+    }
+    const int tileW = ow / cfg.outputTilesX;
+    const int tileH = oh / cfg.outputTilesY;
+    fmt::print("Writing tiled PNGs ({}x{} tiles of {}x{} each).\n",
+               cfg.outputTilesX, cfg.outputTilesY, tileW, tileH);
+    for (int ty = 0; ty < cfg.outputTilesY; ++ty) {
+      for (int tx = 0; tx < cfg.outputTilesX; ++tx) {
+        std::vector<unsigned char> tileBytes((size_t)tileW * (size_t)tileH * 2);
+        for (int y = 0; y < tileH; ++y) {
+          size_t srcRow = (size_t)(ty * tileH + y) * (size_t)ow + (size_t)(tx * tileW);
+          size_t dstRow = (size_t)y * (size_t)tileW;
+          const unsigned char* srcPtr = pngBytes.data() + srcRow * 2;
+          unsigned char* dstPtr = tileBytes.data() + dstRow * 2;
+          std::copy(srcPtr, srcPtr + (size_t)tileW * 2, dstPtr);
+        }
+        fs::path tilePath = outPath;
+        tilePath.replace_filename(
+          fmt::format("{}_{}x{}_{}_{}.png",
+                      outPath.stem().string(),
+                      cfg.outputTilesX, cfg.outputTilesY,
+                      tx + 1, ty + 1));
+        unsigned error = lodepng::encode(tilePath.string(), tileBytes,
+                                         (unsigned)tileW, (unsigned)tileH, LCT_GREY, 16);
+        if (error) {
+          fmt::print(stderr, "PNG encode error {}: {}\n", error, lodepng_error_text(error));
+          GDALClose(ds);
+          return 1;
+        }
+      }
+    }
   }
 
   GDALClose(ds);
