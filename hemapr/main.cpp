@@ -130,11 +130,21 @@ void expandGeoTiffToBounds(const fs::path& inPath,
 
   const int minCol = (int)std::floor(colF + 1e-9);
   const int minRow = (int)std::floor(rowF + 1e-9);
-  const int maxCol = (int)std::ceil(colMaxF - 1e-9);
-  const int maxRow = (int)std::ceil(rowMaxF - 1e-9);
+  int maxCol = (int)std::ceil(colMaxF - 1e-9);
+  int maxRow = (int)std::ceil(rowMaxF - 1e-9);
 
-  const int newW = maxCol - minCol;
-  const int newH = maxRow - minRow;
+  const int expectedWpx = (int)std::llround((expXMax - expXMin) / px);
+  const int expectedHpx = (int)std::llround((expYMax - expYMin) / std::abs(py));
+  if (expectedWpx <= 0 || expectedHpx <= 0) {
+    fmt::print(stderr, "Computed invalid expected size; cannot expand.\n");
+    return;
+  }
+
+  maxCol = minCol + expectedWpx;
+  maxRow = minRow + expectedHpx;
+
+  const int newW = expectedWpx;
+  const int newH = expectedHpx;
 
   if (newW <= 0 || newH <= 0) {
     fmt::print(stderr, "Computed invalid target size; cannot expand.\n");
@@ -274,15 +284,56 @@ int main() {
     double ymin;
     double ymax;
     if (getGeoTransformBounds(ds, xmin, xmax, ymin, ymax)) {
+      double gt[6] = {0};
+      const bool hasGeoTransform = (ds->GetGeoTransform(gt) == CE_None);
+      const double px = hasGeoTransform ? gt[1] : 0.0;
+      const double py = hasGeoTransform ? gt[5] : 0.0;
       fmt::print("Expected bounds from filename: xmin={:.6f} xmax={:.6f} ymin={:.6f} ymax={:.6f}\n",
                  expected->xmin, expected->xmax, expected->ymin, expected->ymax);
       fmt::print("Actual bounds from GeoTIFF:     xmin={:.6f} xmax={:.6f} ymin={:.6f} ymax={:.6f}\n",
                  xmin, xmax, ymin, ymax);
-      bool modify = readYesNo("Modify GeoTIFF to expected bounds?", false);
-      if (modify) {
-        expandGeoTiffToBounds(inPath, ds,
-                              expected->xmin, expected->xmax,
-                              expected->ymin, expected->ymax);
+      const double expectedWidth = expected->xmax - expected->xmin;
+      const double expectedHeight = expected->ymax - expected->ymin;
+      const double actualWidth = xmax - xmin;
+      const double actualHeight = ymax - ymin;
+      const double sizeTol = hasGeoTransform
+        ? std::max(std::abs(px), std::abs(py)) * 0.01
+        : 1e-9;
+      const bool sizeMatches = std::abs(actualWidth - expectedWidth) <= sizeTol &&
+                               std::abs(actualHeight - expectedHeight) <= sizeTol;
+
+      if (sizeMatches) {
+        fmt::print(fg(fmt::color::green) | fmt::emphasis::bold, "Valid\n");
+      } else {
+        if (hasGeoTransform && px != 0.0 && py != 0.0) {
+          const double extendLeft = std::max(0.0, xmin - expected->xmin);
+          const double extendRight = std::max(0.0, expected->xmax - xmax);
+          const double extendTop = std::max(0.0, expected->ymax - ymax);
+          const double extendBottom = std::max(0.0, ymin - expected->ymin);
+
+          const auto pxCount = [](double dist, double pixelSize) {
+            return (int)std::llround(dist / std::abs(pixelSize));
+          };
+
+          const bool needsExtension = extendLeft > sizeTol || extendRight > sizeTol ||
+                                      extendTop > sizeTol || extendBottom > sizeTol;
+          if (needsExtension) {
+            fmt::print("Expected bounds extend beyond actual by:\n");
+            fmt::print("  left  {:.6f} ({} px)\n", extendLeft, pxCount(extendLeft, px));
+            fmt::print("  right {:.6f} ({} px)\n", extendRight, pxCount(extendRight, px));
+            fmt::print("  top   {:.6f} ({} px)\n", extendTop, pxCount(extendTop, py));
+            fmt::print("  bottom {:.6f} ({} px)\n", extendBottom, pxCount(extendBottom, py));
+          } else {
+            fmt::print("Expected bounds are smaller than actual; expansion would crop.\n");
+          }
+        }
+
+        bool modify = readYesNo("Modify GeoTIFF to expected bounds?", false);
+        if (modify) {
+          expandGeoTiffToBounds(inPath, ds,
+                                expected->xmin, expected->xmax,
+                                expected->ymin, expected->ymax);
+        }
       }
     } else {
       fmt::print(stderr, "GeoTransform unavailable; cannot validate bounds.\n");
