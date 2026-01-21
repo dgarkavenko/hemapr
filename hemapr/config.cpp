@@ -27,6 +27,29 @@ bool parseOutputTiles(const std::string& s, int& outX, int& outY) {
   return true;
 }
 
+bool parseTargetResolution(const std::string& s, int& outW, int& outH) {
+  std::string v = lower(trim(s));
+  if (v.empty()) return false;
+  if (v == "0") {
+    outW = 0;
+    outH = 0;
+    return true;
+  }
+  auto xPos = v.find('x');
+  if (xPos == std::string::npos) return false;
+  std::string lhs = v.substr(0, xPos);
+  std::string rhs = v.substr(xPos + 1);
+  if (lhs.empty() || rhs.empty()) return false;
+  try {
+    outW = std::stoi(lhs);
+    outH = std::stoi(rhs);
+  } catch (...) {
+    return false;
+  }
+  if (outW < 1 || outH < 1) return false;
+  return true;
+}
+
 bool parseHexColorToGray16(const std::string& s, uint16_t& out) {
   std::string t = trim(s);
   if (!t.empty() && t[0] == '#') t = t.substr(1);
@@ -63,6 +86,7 @@ void writeDefaultConfig(const fs::path& path) {
     "interpolation = bicubic          # bilinear | bicubic\n"
     "max_proximity_pixels = 4096\n"
     "output_tiles = 0                 # 0 | NxM (e.g. 4x2)\n"
+    "target_resolution = 1024x768     # 0 | WxH (keeps aspect, max size)\n"
     "shore_offset_pixels = 1\n\n"
     "sea_level = 0.0                  # <= sea_level is sea\n"
     "land_min_height = 0.01\n"
@@ -106,6 +130,13 @@ bool loadConfig(const fs::path& path, Config& cfg) {
       if (parseOutputTiles(val, tilesX, tilesY)) {
         cfg.outputTilesX = tilesX;
         cfg.outputTilesY = tilesY;
+      }
+    } else if (key == "target_resolution") {
+      int targetW = cfg.targetWidth;
+      int targetH = cfg.targetHeight;
+      if (parseTargetResolution(val, targetW, targetH)) {
+        cfg.targetWidth = targetW;
+        cfg.targetHeight = targetH;
       }
     } else if (key == "shore_offset_pixels") {
       try { cfg.shoreOffsetPixels = std::stoi(val); } catch (...) {}

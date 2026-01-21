@@ -239,10 +239,13 @@ int main() {
   std::string tilesLabel = (cfg.outputTilesX > 0 && cfg.outputTilesY > 0)
     ? fmt::format("{}x{}", cfg.outputTilesX, cfg.outputTilesY)
     : "0";
+  std::string targetLabel = (cfg.targetWidth > 0 && cfg.targetHeight > 0)
+    ? fmt::format("{}x{}", cfg.targetWidth, cfg.targetHeight)
+    : "0";
   fmt::print(fg(fmt::color::medium_sea_green) | fmt::emphasis::bold,
-             "Config: interp={}, maxProx={}px, tiles={}, seabedCurve={}, gamma={}\n",
+             "Config: interp={}, maxProx={}px, tiles={}, target={}, seabedCurve={}, gamma={}\n",
              (cfg.interp == InterpMode::Bicubic ? "bicubic" : "bilinear"),
-             cfg.maxProximityPixels, tilesLabel, cfg.seabedCurve, cfg.seabedGamma);
+             cfg.maxProximityPixels, tilesLabel, targetLabel, cfg.seabedCurve, cfg.seabedGamma);
 
   fs::path folder = fs::current_path().concat("/data/");
 
@@ -353,11 +356,11 @@ int main() {
   const int sh = ds->GetRasterYSize();
   fmt::print("Original size: {} x {}\n", sw, sh);
 
-  const int biggerDefault = std::max(sw, sh);
-  int biggerSide = readIntWithDefault("Target bigger side (keeps aspect)", biggerDefault);
-  if (biggerSide < 1) biggerSide = biggerDefault;
-
-  const double scale = (double)biggerSide / (double)std::max(sw, sh);
+  const int targetW = cfg.targetWidth;
+  const int targetH = cfg.targetHeight;
+  const double scaleW = (targetW > 0) ? (double)targetW / (double)sw : 1.0;
+  const double scaleH = (targetH > 0) ? (double)targetH / (double)sh : 1.0;
+  const double scale = std::min(1.0, std::min(scaleW, scaleH));
   const int ow = std::max(1, (int)std::llround(sw * scale));
   const int oh = std::max(1, (int)std::llround(sh * scale));
   fmt::print("Output size: {} x {}\n", ow, oh);
