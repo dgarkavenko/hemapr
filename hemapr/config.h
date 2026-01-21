@@ -11,6 +11,8 @@ enum class InterpMode { Bilinear = 1, Bicubic = 2 };
 struct Config {
   InterpMode interp = InterpMode::Bicubic;
   int maxProximityPixels = 4096;
+  int outputTilesX = 0;
+  int outputTilesY = 0;
 
   double seaLevel = 0.0;
   double landMinHeight = 0.01;

@@ -4,6 +4,29 @@
 #include <fstream>
 #include <utility>
 
+bool parseOutputTiles(const std::string& s, int& outX, int& outY) {
+  std::string v = lower(trim(s));
+  if (v.empty()) return false;
+  if (v == "0") {
+    outX = 0;
+    outY = 0;
+    return true;
+  }
+  auto xPos = v.find('x');
+  if (xPos == std::string::npos) return false;
+  std::string lhs = v.substr(0, xPos);
+  std::string rhs = v.substr(xPos + 1);
+  if (lhs.empty() || rhs.empty()) return false;
+  try {
+    outX = std::stoi(lhs);
+    outY = std::stoi(rhs);
+  } catch (...) {
+    return false;
+  }
+  if (outX < 1 || outY < 1) return false;
+  return true;
+}
+
 bool parseHexColorToGray16(const std::string& s, uint16_t& out) {
   std::string t = trim(s);
   if (!t.empty() && t[0] == '#') t = t.substr(1);
@@ -39,6 +62,7 @@ void writeDefaultConfig(const fs::path& path) {
     "# geotiff2png.ini\n\n"
     "interpolation = bicubic          # bilinear | bicubic\n"
     "max_proximity_pixels = 4096\n"
+    "output_tiles = 0                 # 0 | NxM (e.g. 4x2)\n"
     "shore_offset_pixels = 1\n\n"
     "sea_level = 0.0                  # <= sea_level is sea\n"
     "land_min_height = 0.01\n"
@@ -76,6 +100,13 @@ bool loadConfig(const fs::path& path, Config& cfg) {
     } else if (key == "max_proximity_pixels") {
       try { cfg.maxProximityPixels = std::stoi(val); } catch (...) {}
       cfg.maxProximityPixels = std::max(1, cfg.maxProximityPixels);
+    } else if (key == "output_tiles") {
+      int tilesX = cfg.outputTilesX;
+      int tilesY = cfg.outputTilesY;
+      if (parseOutputTiles(val, tilesX, tilesY)) {
+        cfg.outputTilesX = tilesX;
+        cfg.outputTilesY = tilesY;
+      }
     } else if (key == "shore_offset_pixels") {
       try { cfg.shoreOffsetPixels = std::stoi(val); } catch (...) {}
       cfg.shoreOffsetPixels = std::max(0, cfg.shoreOffsetPixels);
