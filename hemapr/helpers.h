@@ -16,4 +16,5 @@ std::string trim(const std::string& s);
 std::string lower(std::string s);
 bool hasTifExt(const fs::path& p);
 int readIntWithDefault(const std::string& prompt, int def);
+bool readYesNo(const std::string& prompt, bool def);
 void writeU16BE(std::vector<unsigned char>& buf, size_t idx, uint16_t v);
