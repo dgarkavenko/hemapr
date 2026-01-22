@@ -165,7 +165,10 @@ void expandGeoTiffToBounds(const fs::path& inPath,
     return;
   }
 
-  std::vector<float> out((size_t)newW * (size_t)newH, 0.0f);
+  int hasNoData = 0;
+  double noData = band->GetNoDataValue(&hasNoData);
+  const float fillValue = hasNoData ? (float)noData : 0.0f;
+  std::vector<float> out((size_t)newW * (size_t)newH, fillValue);
   for (int y = 0; y < sh; ++y) {
     int dy = y - minRow;
     if (dy < 0 || dy >= newH) continue;
@@ -204,6 +207,9 @@ void expandGeoTiffToBounds(const fs::path& inPath,
     fmt::print(stderr, "Failed to access output band.\n");
     GDALClose(outDs);
     return;
+  }
+  if (hasNoData) {
+    outBand->SetNoDataValue(noData);
   }
 
   err = outBand->RasterIO(GF_Write, 0, 0, newW, newH,
