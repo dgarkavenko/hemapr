@@ -224,28 +224,12 @@ int main() {
   GDALAllRegister();
 
   fs::path cfgPath = fs::current_path() / "geotiff2png.ini";
-  Config cfg;
 
   if (!fs::exists(cfgPath)) {
     writeDefaultConfig(cfgPath);
     fmt::print("Created default config: {}\n", cfgPath.string());
   }
-  if (loadConfig(cfgPath, cfg)) {
-    fmt::print("Loaded config: {}\n", cfgPath.string());
-  } else {
-    fmt::print("Config read failed; using defaults.\n");
-  }
-
-  std::string tilesLabel = (cfg.outputTilesX > 0 && cfg.outputTilesY > 0)
-    ? fmt::format("{}x{}", cfg.outputTilesX, cfg.outputTilesY)
-    : "0";
-  std::string targetLabel = (cfg.targetWidth > 0 && cfg.targetHeight > 0)
-    ? fmt::format("{}x{}", cfg.targetWidth, cfg.targetHeight)
-    : "0";
-  fmt::print(fg(fmt::color::medium_sea_green) | fmt::emphasis::bold,
-             "Config: interp={}, maxProx={}px, tiles={}, target={}, seabedCurve={}, gamma={}\n",
-             (cfg.interp == InterpMode::Bicubic ? "bicubic" : "bilinear"),
-             cfg.maxProximityPixels, tilesLabel, targetLabel, cfg.seabedCurve, cfg.seabedGamma);
+  Config cfg;
 
   fs::path folder = fs::current_path().concat("/data/");
   bool processAnother = true;
@@ -275,6 +259,24 @@ int main() {
     fs::path inPath = tifs[choice - 1];
 
     fmt::print("\nOpening: {}\n", inPath.string());
+
+    cfg = Config{};
+    if (loadConfig(cfgPath, cfg)) {
+      fmt::print("Loaded config: {}\n", cfgPath.string());
+    } else {
+      fmt::print("Config read failed; using defaults.\n");
+    }
+
+    std::string tilesLabel = (cfg.outputTilesX > 0 && cfg.outputTilesY > 0)
+      ? fmt::format("{}x{}", cfg.outputTilesX, cfg.outputTilesY)
+      : "0";
+    std::string targetLabel = (cfg.targetWidth > 0 && cfg.targetHeight > 0)
+      ? fmt::format("{}x{}", cfg.targetWidth, cfg.targetHeight)
+      : "0";
+    fmt::print(fg(fmt::color::medium_sea_green) | fmt::emphasis::bold,
+               "Config: interp={}, maxProx={}px, tiles={}, target={}, seabedCurve={}, gamma={}\n",
+               (cfg.interp == InterpMode::Bicubic ? "bicubic" : "bilinear"),
+               cfg.maxProximityPixels, tilesLabel, targetLabel, cfg.seabedCurve, cfg.seabedGamma);
 
     GDALDataset* ds = (GDALDataset*)GDALOpen(inPath.string().c_str(), GA_ReadOnly);
     if (!ds) {
