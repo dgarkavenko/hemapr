@@ -486,21 +486,38 @@ int main() {
         return 1;
       }
     } else {
-      if (ow % cfg.outputTilesX != 0 || oh % cfg.outputTilesY != 0) {
-        fmt::print(stderr, "Output size {}x{} not divisible by tiles {}x{}.\n",
-                   ow, oh, cfg.outputTilesX, cfg.outputTilesY);
-        GDALClose(ds);
-        return 1;
+      const int totalTileW = ow + cfg.outputTilesX - 1;
+      const int totalTileH = oh + cfg.outputTilesY - 1;
+      const int baseTileW = totalTileW / cfg.outputTilesX;
+      const int baseTileH = totalTileH / cfg.outputTilesY;
+      const int extraTileW = totalTileW % cfg.outputTilesX;
+      const int extraTileH = totalTileH % cfg.outputTilesY;
+
+      std::vector<int> tileWidths(cfg.outputTilesX);
+      std::vector<int> tileHeights(cfg.outputTilesY);
+      std::vector<int> tileStartsX(cfg.outputTilesX);
+      std::vector<int> tileStartsY(cfg.outputTilesY);
+
+      for (int tx = 0; tx < cfg.outputTilesX; ++tx) {
+        tileWidths[tx] = baseTileW + (tx < extraTileW ? 1 : 0);
+        tileStartsX[tx] = (tx == 0) ? 0 : (tileStartsX[tx - 1] + tileWidths[tx - 1] - 1);
       }
-      const int tileW = ow / cfg.outputTilesX;
-      const int tileH = oh / cfg.outputTilesY;
-      fmt::print("Writing tiled PNGs ({}x{} tiles of {}x{} each).\n",
-                 cfg.outputTilesX, cfg.outputTilesY, tileW, tileH);
+      for (int ty = 0; ty < cfg.outputTilesY; ++ty) {
+        tileHeights[ty] = baseTileH + (ty < extraTileH ? 1 : 0);
+        tileStartsY[ty] = (ty == 0) ? 0 : (tileStartsY[ty - 1] + tileHeights[ty - 1] - 1);
+      }
+
+      fmt::print("Writing tiled PNGs ({}x{} tiles, 1px overlap).\n",
+                 cfg.outputTilesX, cfg.outputTilesY);
       for (int ty = 0; ty < cfg.outputTilesY; ++ty) {
         for (int tx = 0; tx < cfg.outputTilesX; ++tx) {
+          const int tileW = tileWidths[tx];
+          const int tileH = tileHeights[ty];
+          const int startX = tileStartsX[tx];
+          const int startY = tileStartsY[ty];
           std::vector<unsigned char> tileBytes((size_t)tileW * (size_t)tileH * 2);
           for (int y = 0; y < tileH; ++y) {
-            size_t srcRow = (size_t)(ty * tileH + y) * (size_t)ow + (size_t)(tx * tileW);
+            size_t srcRow = (size_t)(startY + y) * (size_t)ow + (size_t)startX;
             size_t dstRow = (size_t)y * (size_t)tileW;
             const unsigned char* srcPtr = pngBytes.data() + srcRow * 2;
             unsigned char* dstPtr = tileBytes.data() + dstRow * 2;
