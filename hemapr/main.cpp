@@ -2,8 +2,6 @@
 #define FMT_UNICODE 0
 
 #include <algorithm>
-#include <atomic>
-#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <iostream>
@@ -11,7 +9,6 @@
 #include <optional>
 #include <regex>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include <fmt/color.h>
@@ -37,40 +34,6 @@ struct ExpectedBounds {
   double ymin;
   double ymax;
 };
-
-std::string formatConfigSummary(const Config& cfg) {
-  std::string tilesLabel = (cfg.outputTilesX > 0 && cfg.outputTilesY > 0)
-    ? fmt::format("{}x{}", cfg.outputTilesX, cfg.outputTilesY)
-    : "0";
-  std::string targetLabel = (cfg.targetWidth > 0 && cfg.targetHeight > 0)
-    ? fmt::format("{}x{}", cfg.targetWidth, cfg.targetHeight)
-    : "0";
-  return fmt::format("interp={}, maxProx={}px, tiles={}, target={}, seabedCurve={}, gamma={}",
-                     (cfg.interp == InterpMode::Bicubic ? "bicubic" : "bilinear"),
-                     cfg.maxProximityPixels, tilesLabel, targetLabel, cfg.seabedCurve, cfg.seabedGamma);
-}
-
-bool reloadConfigIfChanged(const fs::path& cfgPath,
-                           fs::file_time_type& lastWrite,
-                           Config& cfg) {
-  std::error_code ec;
-  fs::file_time_type currentWrite = fs::last_write_time(cfgPath, ec);
-  if (ec) {
-    currentWrite = fs::file_time_type::min();
-  }
-  if (currentWrite == lastWrite) return false;
-  lastWrite = currentWrite;
-
-  Config updated = cfg;
-  if (loadConfig(cfgPath, updated)) {
-    cfg = updated;
-    fmt::print(fg(fmt::color::medium_sea_green) | fmt::emphasis::bold,
-               "Config updated: {}\n", formatConfigSummary(cfg));
-  } else {
-    fmt::print(stderr, "Config read failed; keeping previous values.\n");
-  }
-  return true;
-}
 
 std::optional<ExpectedBounds> parseExpectedBounds(const fs::path& path) {
   std::string name = path.stem().string();
@@ -273,31 +236,16 @@ int main() {
     fmt::print("Config read failed; using defaults.\n");
   }
 
+  std::string tilesLabel = (cfg.outputTilesX > 0 && cfg.outputTilesY > 0)
+    ? fmt::format("{}x{}", cfg.outputTilesX, cfg.outputTilesY)
+    : "0";
+  std::string targetLabel = (cfg.targetWidth > 0 && cfg.targetHeight > 0)
+    ? fmt::format("{}x{}", cfg.targetWidth, cfg.targetHeight)
+    : "0";
   fmt::print(fg(fmt::color::medium_sea_green) | fmt::emphasis::bold,
-             "Config: {}\n", formatConfigSummary(cfg));
-
-  fmt::print("Edit {} to change settings. Press Enter to continue.\n", cfgPath.string());
-  std::error_code lastWriteErr;
-  fs::file_time_type lastWrite = fs::last_write_time(cfgPath, lastWriteErr);
-  if (lastWriteErr) {
-    lastWrite = fs::file_time_type::min();
-  }
-
-  std::atomic<bool> proceed{false};
-  std::thread inputThread([&proceed]() {
-    std::string line;
-    std::getline(std::cin, line);
-    proceed.store(true);
-  });
-
-  while (!proceed.load()) {
-    reloadConfigIfChanged(cfgPath, lastWrite, cfg);
-    std::this_thread::sleep_for(std::chrono::milliseconds(250));
-  }
-
-  if (inputThread.joinable()) {
-    inputThread.join();
-  }
+             "Config: interp={}, maxProx={}px, tiles={}, target={}, seabedCurve={}, gamma={}\n",
+             (cfg.interp == InterpMode::Bicubic ? "bicubic" : "bilinear"),
+             cfg.maxProximityPixels, tilesLabel, targetLabel, cfg.seabedCurve, cfg.seabedGamma);
 
   fs::path folder = fs::current_path().concat("/data/");
   bool processAnother = true;
