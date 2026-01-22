@@ -86,7 +86,7 @@ void writeDefaultConfig(const fs::path& path) {
     "interpolation = bicubic          # bilinear | bicubic\n"
     "max_proximity_pixels = 4096\n"
     "output_tiles = 0                 # 0 | NxM (e.g. 4x2)\n"
-    "target_resolution = 1024x768     # 0 | WxH (keeps aspect, max size)\n"
+    "target_resolution = 1024x768     # 0 | WxH (exact size, per-tile when output_tiles > 1)\n"
     "shore_offset_pixels = 1\n\n"
     "sea_level = 0.0                  # <= sea_level is sea\n"
     "land_min_height = 0.01\n"

@@ -273,11 +273,14 @@ int main() {
       fmt::print("Config read failed; using defaults.\n");
     }
 
-    std::string tilesLabel = (cfg.outputTilesX > 0 && cfg.outputTilesY > 0)
+    const bool tilesConfigured = cfg.outputTilesX > 0 && cfg.outputTilesY > 0;
+    const bool hasTiles = tilesConfigured && (cfg.outputTilesX > 1 || cfg.outputTilesY > 1);
+    std::string tilesLabel = tilesConfigured
       ? fmt::format("{}x{}", cfg.outputTilesX, cfg.outputTilesY)
       : "0";
     std::string targetLabel = (cfg.targetWidth > 0 && cfg.targetHeight > 0)
-      ? fmt::format("{}x{}", cfg.targetWidth, cfg.targetHeight)
+      ? fmt::format("{}x{}{}", cfg.targetWidth, cfg.targetHeight,
+                    hasTiles ? " per-tile" : "")
       : "0";
     fmt::print(fg(fmt::color::medium_sea_green) | fmt::emphasis::bold,
                "Config: interp={}, maxProx={}px, tiles={}, target={}, seabedCurve={}, gamma={}\n",
@@ -366,13 +369,15 @@ int main() {
     const int sh = ds->GetRasterYSize();
     fmt::print("Original size: {} x {}\n", sw, sh);
 
-    const int targetW = cfg.targetWidth;
-    const int targetH = cfg.targetHeight;
-    const double scaleW = (targetW > 0) ? (double)targetW / (double)sw : 1.0;
-    const double scaleH = (targetH > 0) ? (double)targetH / (double)sh : 1.0;
-    const double scale = std::min(1.0, std::min(scaleW, scaleH));
-    const int ow = std::max(1, (int)std::llround(sw * scale));
-    const int oh = std::max(1, (int)std::llround(sh * scale));
+    int targetW = cfg.targetWidth;
+    int targetH = cfg.targetHeight;
+    if (tilesConfigured && targetW > 0 && targetH > 0) {
+      targetW = targetW * cfg.outputTilesX - (cfg.outputTilesX - 1);
+      targetH = targetH * cfg.outputTilesY - (cfg.outputTilesY - 1);
+    }
+    const bool hasTarget = targetW > 0 && targetH > 0;
+    const int ow = hasTarget ? targetW : sw;
+    const int oh = hasTarget ? targetH : sh;
     fmt::print("Output size: {} x {}\n", ow, oh);
 
     std::vector<float> src((size_t)sw * (size_t)sh);
@@ -474,8 +479,6 @@ int main() {
     fs::path outPath = inPath;
     outPath.replace_extension(".png");
 
-    const bool hasTiles = cfg.outputTilesX > 0 && cfg.outputTilesY > 0 &&
-                          (cfg.outputTilesX > 1 || cfg.outputTilesY > 1);
     if (!hasTiles) {
       fmt::print("Writing 16-bit PNG: {}\n", outPath.string());
       unsigned error = lodepng::encode(outPath.string(), pngBytes,
